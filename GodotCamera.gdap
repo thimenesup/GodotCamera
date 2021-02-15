@@ -1,0 +1,5 @@
+[config]
+
+name="GodotCamera"
+binary_type="local"
+binary="GodotCamera.1.0.0.release.aar"
