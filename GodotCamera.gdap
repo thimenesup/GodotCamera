@@ -2,4 +2,4 @@
 
 name="GodotCamera"
 binary_type="local"
-binary="GodotCamera.1.0.0.release.aar"
+binary="godot-camera/build/outputs/aar/GodotCamera.1.0.0.release.aar"

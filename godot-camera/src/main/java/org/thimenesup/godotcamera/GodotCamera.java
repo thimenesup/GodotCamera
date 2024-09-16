@@ -33,6 +33,12 @@ public class GodotCamera extends GodotPlugin {
     SurfaceTexture previewTexture = new SurfaceTexture(0);
 
     RenderScript renderScript = null;
+    ScriptIntrinsicYuvToRGB yuvToRgbIntrinsic = null;
+    Type.Builder yuvType = null;
+    Allocation scriptInput = null;
+    Type.Builder rgbaType = null;
+    Allocation scriptOutput = null;
+    byte[] rgbData = null;
 
 
     public GodotCamera(Godot godot) {
@@ -65,10 +71,10 @@ public class GodotCamera extends GodotPlugin {
         methods.add("getPreviewFormat");
         methods.add("getSupportedPreviewFormats");
 
-        return  methods;
+        return methods;
     }
 
-    public void init(final int script_id)
+    public void init(final int scriptID)
     {
 
     }
@@ -78,11 +84,11 @@ public class GodotCamera extends GodotPlugin {
         callbackObjectID = callbackID;
     }
 
-    public int initializeCamera(int cameraId)
+    public int initializeCamera(int cameraID)
     {
         int success = 0;
         try {
-            camera = Camera.open(cameraId);
+            camera = Camera.open(cameraID);
             success = 1;
         }
         catch (Exception e) {
@@ -104,18 +110,29 @@ public class GodotCamera extends GodotPlugin {
         }
 
         renderScript = RenderScript.create(context);
+        yuvToRgbIntrinsic = ScriptIntrinsicYuvToRGB.create(renderScript, Element.U8_4(renderScript));
+        {
+            Camera.Parameters parameters = camera.getParameters();
+            Camera.Size size = parameters.getPreviewSize();
+            setupCallbackBuffers(size.width, size.height);
+        }
 
         Camera.PreviewCallback previewCallback = new Camera.PreviewCallback()
         {
             public void onPreviewFrame(byte[] data, Camera camera)
             {
+                //Convert from YUV to RGBA
+                scriptInput.copyFrom(data);
+                yuvToRgbIntrinsic.setInput(scriptInput);
+                yuvToRgbIntrinsic.forEach(scriptOutput);
+                scriptOutput.copyTo(rgbData);
+
                 Camera.Parameters parameters = camera.getParameters();
                 Camera.Size size = parameters.getPreviewSize();
-                byte[] rgbData = yuv2rgb(data, size.width, size.height);
+                
                 GodotLib.calldeferred(callbackObjectID, "_on_captured_data", new Object[]{rgbData, size.width, size.height});
             }
         };
-
         camera.setPreviewCallback(previewCallback);
 
         camera.startPreview();
@@ -201,25 +218,16 @@ public class GodotCamera extends GodotPlugin {
     }
 
 
-    private byte[] yuv2rgb(byte[] yuvData, int w, int h)
+    private void setupCallbackBuffers(int width, int height)
     {
-        ScriptIntrinsicYuvToRGB yuvToRgbIntrinsic = ScriptIntrinsicYuvToRGB.create(renderScript, Element.U8_4(renderScript));
+        int yuvBufferLength = width * height * 3 / 2; // 12 bits per pixel
+        yuvType = new Type.Builder(renderScript, Element.U8(renderScript)).setX(yuvBufferLength);
+        scriptInput = Allocation.createTyped(renderScript, yuvType.create(), Allocation.USAGE_SCRIPT);
 
-        Type.Builder yuvType = new Type.Builder(renderScript, Element.U8(renderScript)).setX(yuvData.length);
-        Allocation in = Allocation.createTyped(renderScript, yuvType.create(), Allocation.USAGE_SCRIPT);
+        rgbaType = new Type.Builder(renderScript, Element.RGBA_8888(renderScript)).setX(width).setY(height);
+        scriptOutput = Allocation.createTyped(renderScript, rgbaType.create(), Allocation.USAGE_SCRIPT);
 
-        Type.Builder rgbaType = new Type.Builder(renderScript, Element.RGBA_8888(renderScript)).setX(w).setY(h);
-        Allocation out = Allocation.createTyped(renderScript, rgbaType.create(), Allocation.USAGE_SCRIPT);
-
-        in.copyFrom(yuvData);
-
-        yuvToRgbIntrinsic.setInput(in);
-        yuvToRgbIntrinsic.forEach(out);
-
-        byte[] outBytes = new byte[w * h * 4];
-        out.copyTo(outBytes);
-
-        return outBytes;
+        rgbData = new byte[width * height * 4];
     }
 
 }
